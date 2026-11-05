@@ -1,0 +1,55 @@
+name: Radar 90 - buteurs et passeurs
+
+on:
+  schedule:
+    - cron: "20 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  buteurs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Recuperer buteurs et passeurs
+        env:
+          API_KEY: ${{ secrets.API_FOOTBALL_KEY }}
+        run: |
+          python3 - <<'PY'
+          import json, os, datetime, urllib.request
+          key = os.environ["API_KEY"]
+          base = "https://v3.football.api-sports.io/"
+          def get(path):
+              req = urllib.request.Request(base + path, headers={"x-apisports-key": key})
+              with urllib.request.urlopen(req, timeout=60) as r:
+                  return json.load(r)
+          ligues = {39: "Premier League", 40: "Championship", 140: "Liga", 141: "Liga 2",
+                    135: "Serie A", 136: "Serie B", 61: "Ligue 1", 62: "Ligue 2", 63: "National",
+                    78: "Bundesliga", 79: "2. Bundesliga", 94: "Portugal Liga", 95: "Portugal Liga 2",
+                    144: "Belgique Pro League", 207: "Suisse Super League", 208: "Suisse Challenge League",
+                    2: "Ligue des champions", 3: "Europa League", 848: "Ligue Conference", 179: "Ecosse Premiership"}
+          today = datetime.date.today()
+          saison = today.year if today.month >= 7 else today.year - 1
+          os.makedirs("data", exist_ok=True)
+          out = {"genere_le": datetime.datetime.utcnow().isoformat() + "Z", "saison": saison, "ligues": {}}
+          for lid, nom in ligues.items():
+              b = get(f"players/topscorers?league={lid}&season={saison}")
+              p = get(f"players/topassists?league={lid}&season={saison}")
+              out["ligues"][nom] = {"id": lid, "buteurs": b.get("response", []), "passeurs": p.get("response", []),
+                                    "erreurs": [b.get("errors"), p.get("errors")]}
+          with open("data/buteurs.json", "w") as f:
+              json.dump(out, f, ensure_ascii=False)
+          print("OK", {n: (len(v["buteurs"]), len(v["passeurs"])) for n, v in out["ligues"].items()})
+          PY
+
+      - name: Enregistrer
+        run: |
+          git config user.name "radar90-bot"
+          git config user.email "radar90-bot@users.noreply.github.com"
+          git pull --rebase || true
+          git add data
+          git commit -m "Buteurs du $(date +%F)" || echo "rien de nouveau"
+          git push
